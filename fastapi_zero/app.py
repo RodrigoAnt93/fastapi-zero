@@ -1,7 +1,9 @@
 from http import HTTPStatus
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy import delete, select
 
+from fastapi_zero.database import get_session
 from fastapi_zero.schemas import (
     Message,
     User,
@@ -10,7 +12,7 @@ from fastapi_zero.schemas import (
     UserResponse,
 )
 from fastapi_zero.settings import Settings
-from fastapi_zero.models import User
+from fastapi_zero.models import User as UserModel
 
 app = FastAPI()
 
@@ -25,43 +27,70 @@ def read_root():
 @app.post(
     '/users', status_code=HTTPStatus.CREATED, response_model=UserResponse
 )
-def create_user(user: User):
-    from sqlalchemy import create_engine, select
-    from sqlalchemy.orm import Session
-    engine = create_engine(Settings().DATABASE_URL)
-    session = Session(engine) 
-    session.scalar(select(User).where((User.username == user.username) | (User.email == user.email)))
-
+def create_user(user: User, session = Depends(get_session)):
     
+    db_user = session.scalar(select(UserModel).where((UserModel.username == user.username) | (UserModel.email == user.email)))
+    
+    if db_user:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT, detail='User already exists'
+        )
+
+    db_user = UserModel(
+        username=user.username,
+        email=user.email,
+        password=user.password
+    )
+    session.add(db_user)
+    session.commit()
+    session.refresh(db_user)
+    return db_user
 
 @app.get('/users', status_code=HTTPStatus.OK, response_model=UserList)
-def get_users():
-    return {'users': database}
+def get_users(limit: int = 10, offset: int = 0, session = Depends(get_session)):
+    users = session.scalars(
+        select(UserModel)
+        .offset(offset)
+        .limit(limit)
+        )
+    return {'users': users}
 
 
 @app.put(
     '/users/{user_id}', status_code=HTTPStatus.OK, response_model=UserResponse
 )
-def update_user(user_id: int, user: User):
-    user_with_id = UserInDB(**user.model_dump(), id=user_id)
+def update_user(user_id: int, user: User, session = Depends(get_session)):
+    user_db = session.scalar(select(UserModel).where(UserModel.id == user_id))
 
-    if user_id < 1 or user_id > len(database):
+    if not user_db:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND, detail='User not found'
         )
+    
+    user_db.username = user.username
+    user_db.email = user.email
+    user_db.password = user.password
 
-    database[user_id - 1] = user_with_id
-    return user_with_id
+    session.commit()
+    session.refresh(user_db)
+    return user_db
 
+    
 
 @app.delete(
-    '/users/{user_id}', status_code=HTTPStatus.OK, response_model=UserResponse
+    '/users/{user_id}', 
+    status_code=HTTPStatus.OK, 
+    response_model=Message,
 )
-def delete_user(user_id: int):
-    if user_id < 1 or user_id > len(database):
+def delete_user(user_id: int, session = Depends(get_session)):
+    
+    user_db = session.scalar(select(UserModel).where(UserModel.id == user_id))
+
+    if not user_db:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND, detail='User not found'
         )
 
-    user = database.pop(user_id - 1)
-    return user
+    session.delete(user_db)
+    session.commit()
+    return {'message': 'User deleted'}
