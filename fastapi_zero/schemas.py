@@ -25,3 +25,8 @@ class UserInDB(User):
 
 class UserList(BaseModel):
     users: list[UserResponse]
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
