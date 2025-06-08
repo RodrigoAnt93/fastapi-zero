@@ -1,9 +1,13 @@
+from dataclasses import asdict
 from sqlalchemy import select
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi_zero.models import User
 
 
-def test_user_model(session, mock_db_time):
+@pytest.mark.asyncio
+async def test_user_model(session: AsyncSession, mock_db_time):
     with mock_db_time(User) as (time, update):
         new_user = User(
             username='testuser',
@@ -11,11 +15,13 @@ def test_user_model(session, mock_db_time):
             password='testpassword',
         )
         session.add(new_user)
-        session.commit()
-        user = session.scalar(select(User).where(User.id == new_user.id))
-        assert user.id == 1
-        assert user.username == 'testuser'
-        assert user.email == 'testuser@example.com'
-        assert user.password == 'testpassword'
-        assert user.created_at == time
-        assert user.updated_at == update
+        await session.commit()
+        user = await session.scalar(select(User).where(User.username == 'testuser'))
+    assert asdict(user) == {
+        'id': 1,
+        'username': 'testuser',
+        'email': 'testuser@example.com',
+        'password': 'testpassword',
+        'created_at': time,
+        'updated_at': update,
+    }
